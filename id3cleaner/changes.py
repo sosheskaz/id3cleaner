@@ -1,6 +1,7 @@
 from eyed3.mp3 import Mp3AudioFile
 from id3cleaner.errors import ID3CleanerArgumentContradictionError
 
+
 class ID3Change():
     _field = None
 
@@ -36,8 +37,10 @@ class ID3Change():
             setattr(id3file.tag, self._field, new_value)
         return change_str
 
+
 class SimpleID3Change(ID3Change):
     '''This handles changes for most id3 tags use cases.'''
+
     def __init__(self, field: str, transformer: object, needs_change=None):
         super().__init__(field)
         self.transformer = transformer
@@ -46,6 +49,7 @@ class SimpleID3Change(ID3Change):
 
     def get_new_value(self, id3file):
         return self.transformer(self.get_current_value(id3file))
+
 
 class ComplexID3Change(ID3Change):
     def __init__(self, field: str, transformer: object, needs_change=None):
@@ -56,6 +60,7 @@ class ComplexID3Change(ID3Change):
 
     def get_new_value(self, id3file):
         return self.transformer(id3file)
+
 
 class SimpleFrameID3Change(SimpleID3Change):
     def get_current_value(self, id3file):
@@ -85,22 +90,20 @@ class SimpleFrameID3Change(SimpleID3Change):
     def apply_change(self, id3file):
         change_str = self.change_str(id3file)
 
-        frameobj = getattr(id3file.tag, self.field)
         if self.change_str:
-            current = self.get_current_value(id3file)
-            for i in range(0, len(current)):
-                frame = frameobj[i]
-                self.put_frames(id3file, self.get_new_value(id3file))
+            self.put_frames(id3file, self.get_new_value(id3file))
         return change_str
+
 
 class ComplexFrameID3Change(SimpleFrameID3Change):
     '''A ComplexID3Change which is special-purpose for dealing with frame objects like comments and lyrics.'''
+
     def __init__(self, field: str, transformer: object):
-        super().__init__(field)
+        super().__init__(field, transformer)
         self.transformer = transformer
 
     def get_current_value(self, id3file):
-        return self.frame_repr(id3file)
+        return self.get_frame_repr(id3file)
 
     def get_new_value(self, id3file):
         return self.transformer(id3file)
@@ -131,6 +134,7 @@ class ImageID3Change(ID3Change):
             id3file.tag.images[0].image_data = new_value
         return change_str
 
+
 class ID3ChangeChain(ID3Change):
     def __init__(self, field):
         super().__init__(field)
@@ -139,7 +143,7 @@ class ID3ChangeChain(ID3Change):
     def add(self, change: ID3Change):
         if change.field != self.field:
             raise ID3CleanerArgumentContradictionError(
-                f'Found mismatched change field {field} in change chain of type {self.field}')
+                f'Found mismatched change field {self.field} in change chain of type {self.field}')
         # This feeds the output of each step of the chain into the next step as we build the chain.
         if self.sub_changes:
             prevchange = self.sub_changes[-1]
@@ -158,6 +162,7 @@ class ID3ChangeChain(ID3Change):
     def apply_change(self, id3file):
         return '\n'.join(item.apply_change(id3file) for item in self.sub_changes)
 
+
 class ChangeProfile():
     change_def: dict = {}
 
@@ -173,11 +178,12 @@ class ChangeProfile():
     def check(self):
         contradictions = [
             f'Change registered under {key}, but change has field ID {value.field}'
-            for key, value in change_def.items()
+            for key, value in self.change_def.items()
             if key != value.field
         ]
         if any(contradictions):
-            raise ID3CleanerArgumentContradictionError(contradictions.join('\n'))
+            raise ID3CleanerArgumentContradictionError(
+                contradictions.join('\n'))
 
     def needs_change(self, id3file: Mp3AudioFile):
         return any(c.needs_change(id3file) for c in self.change_def.values())

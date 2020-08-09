@@ -7,11 +7,13 @@ def strtrim(s):
         return s
     return f'{s.strip()}'
 
+
 def lowercaselang(framedict):
     framedict = copy.deepcopy(framedict)
     for item in framedict.values():
         item['lang'] = item['lang'].lower()
     return framedict
+
 
 def framestrtrim(framedict):
     framedict = copy.deepcopy(framedict)
@@ -19,6 +21,7 @@ def framestrtrim(framedict):
         item['lang'] = item['lang'].strip()
         item['text'] = item['text'].strip()
     return framedict
+
 
 def default_cleaner_profile(profile: ChangeProfile):
     '''Builds the default cleaner profile'''

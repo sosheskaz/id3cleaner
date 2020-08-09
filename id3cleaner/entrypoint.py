@@ -1,11 +1,22 @@
 #!/usr/bin/env python3
 import argparse
+import logging
 import os
 import re
 import time
 import eyed3
 import eyed3.id3
 from id3cleaner import profiles, changes, id3_fmt
+
+
+def _setuplogger(loglevel):
+    if isinstance(loglevel, str):
+        loglevel = getattr(logging, loglevel)
+    logging.basicConfig(level=loglevel)
+
+
+LOG = logging.getLogger(__name__)
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -19,23 +30,29 @@ def main():
     parser.add_argument('--rename')
     parser.add_argument('filenames', nargs='+')
     parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument('--loglevel', default='WARN',
+                        choices=('ERROR', 'WARN', 'INFO', 'DEBUG'))
     args = parser.parse_args()
+    _setuplogger(args.loglevel)
 
     filenames = args.filenames
+    files_not_found = [fn for fn in filenames
+                       if (not os.path.isfile(fn) and not os.path.islink(fn))]
+    if files_not_found:
+        LOG.error(f'The following files were not found: {files_not_found}')
     audiofiles = [eyed3.load(filename) for filename in filenames]
-
 
     profile = changes.ChangeProfile()
     for optfield in ('title', 'artist', 'album', 'album_artist', 'track_num', 'genre'):
         arg = getattr(args, optfield)
         if arg is not None:
             arg2 = arg  # Make a copy to pass into lambda statically
-            change = changes.ComplexID3Change(optfield, lambda f: id3_fmt.format(arg2, f))
+            change = changes.ComplexID3Change(
+                optfield, lambda f: id3_fmt.format(arg2, f))
             profile.add_change(change)
 
     profiles.default_cleaner_profile(profile)
 
-    picture_file_bytes = None
     if args.picture_file:
         def get_picture(af):
             with open(id3_fmt.format(args.picture_file, af), 'rb') as pf:
@@ -51,7 +68,8 @@ def main():
                 rename_to = id3_fmt.format(args.rename, af)
                 rename_to = re.sub(r'[/\\;#%{}<>*?+`|=]', '_', rename_to)
 
-            print('\n'.join(f'{af.path}: PLAN {i}' for i in profile.whatif(af)))
+            print(
+                '\n'.join(f'{af.path}: PLAN {i}' for i in profile.whatif(af)))
             _, ext = os.path.splitext(os.path.basename(af.path))
             new_name = f'{rename_to}{ext}'
             if rename_to and os.path.basename(af.path) != new_name:
@@ -69,7 +87,7 @@ def main():
                         print(f'{af.path}: Renaming to {new_name}')
                         af.rename(rename_to)
                         new_path = af.path
-                        print(f'{old_path}: Renamed to {new_name}')
+                        print(f'{old_path}: Renamed to {new_path}')
                     if args.dry_run:
                         continue
         else:
