@@ -18,7 +18,7 @@ def _setuplogger(loglevel):
 LOG = logging.getLogger(__name__)
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument('--title')
     parser.add_argument('--artist')
@@ -61,38 +61,46 @@ def main():
         picture_change = changes.ImageID3Change('images', get_picture)
         profile.add_change(picture_change)
 
-    for af in audiofiles:
-        if profile.needs_change(af):
-            rename_to = args.rename
-            if args.rename:
-                rename_to = id3_fmt.format(args.rename, af)
-                rename_to = re.sub(r'[/\\;#%{}<>*?+`|=]', '_', rename_to)
+    try:
+        for af in audiofiles:
+            _handle_audio_file(af, profile, args)
+    except BaseException as e:
+        print(e)
+        return -1
 
+    return 0
+
+def _handle_audio_file(af: str, profile: changes.ChangeProfile, args):
+    rename_diff = False
+    _, ext = os.path.splitext(os.path.basename(af.path))
+    if args.rename:
+        rename_to = id3_fmt.format(args.rename, af)
+        rename_to = re.sub(r'[/\\;#%{}<>*?+`|=]', '_', rename_to)
+        new_name = f'{rename_to}{ext}'
+        rename_diff = new_name != os.path.basename(af.path)
+
+    if profile.needs_change(af) or rename_diff:
+        if profile.needs_change(af):
             print(
                 '\n'.join(f'{af.path}: PLAN {i}' for i in profile.whatif(af)))
-            _, ext = os.path.splitext(os.path.basename(af.path))
-            new_name = f'{rename_to}{ext}'
-            if rename_to and os.path.basename(af.path) != new_name:
-                print(f'{af.path}: Will be renamed to {new_name}')
-            if args.dry_run:
-                continue
-            else:
-                print('\n'.join(f'{af.path}: {i}' for i in profile.apply(af)))
-                print(f'{af.path}: Saving...')
-                af.tag.save()
-                print(f'{af.path} Saved!')
-                if rename_to:
-                    old_path = af.path
-                    if os.path.basename(old_path) != f'{new_name}' and not args.dry_run:
-                        print(f'{af.path}: Renaming to {new_name}')
-                        af.rename(rename_to)
-                        new_path = af.path
-                        print(f'{old_path}: Renamed to {new_path}')
-                    if args.dry_run:
-                        continue
+        new_name = f'{rename_to}{ext}'
+        if args.rename and rename_diff:
+            print(f'"{af.path}" RENAME => "{new_name}"')
+        if args.dry_run:
+            return
         else:
-            print(f'{af.path}: No change.')
-
-    # if not args.dry_run:
-    #     print(f'Saving {args.filename}.')
-    #     audiofile.tag.save()
+            print('\n'.join(f'{af.path}: {i}' for i in profile.apply(af)))
+            print(f'{af.path}: Saving...')
+            af.tag.save()
+            print(f'{af.path}: Saved!')
+            if rename_to:
+                old_path = af.path
+                if os.path.basename(old_path) != f'{new_name}' and not args.dry_run:
+                    print(f'{af.path}: Renaming to "{new_name}"')
+                    af.rename(rename_to)
+                    new_path = af.path
+                    print(f'{old_path}: Renamed to "{new_path}"')
+                if args.dry_run:
+                    return
+    else:
+        print(f'{af.path}: No change.')

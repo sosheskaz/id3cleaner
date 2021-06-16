@@ -8,7 +8,7 @@ with open('requirements.txt') as fh:
 
 setuptools.setup(
     name="id3cleaner", # Replace with your own username
-    version="0.0.2",
+    version="0.0.3",
     author="Eric Miller",
     author_email="sosheskaz.github.io@gmail.com",
     description="Easily clean and tweak ID3 tags from the command line.",
