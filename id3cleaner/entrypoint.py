@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import argparse
-import logging
+import coloredlogs
 import os
 import re
 import time
@@ -30,7 +30,7 @@ def main() -> int:
     parser.add_argument('--rename')
     parser.add_argument('filenames', nargs='+')
     parser.add_argument('--dry-run', action='store_true')
-    parser.add_argument('--loglevel', default='WARN',
+    parser.add_argument('--loglevel', default='INFO',
                         choices=('ERROR', 'WARN', 'INFO', 'DEBUG'))
     args = parser.parse_args()
     _setuplogger(args.loglevel)
@@ -40,7 +40,15 @@ def main() -> int:
                        if (not os.path.isfile(fn) and not os.path.islink(fn))]
     if files_not_found:
         LOG.error(f'The following files were not found: {files_not_found}')
-    audiofiles = [eyed3.load(filename) for filename in filenames]
+
+
+    try:
+        # force load of everything up front to make sure it works, then load
+        # lazily later to save cycles
+        _ = all(eyed3.load(filename) for filename in filenames)
+    except Exception as e:
+        LOG.fatal(e)
+    audio_files = (eyed3.load(filename) for filename in filenames)
 
     profile = changes.ChangeProfile()
     for optfield in ('title', 'artist', 'album', 'album_artist', 'track_num', 'genre'):
@@ -62,7 +70,7 @@ def main() -> int:
         profile.add_change(picture_change)
 
     try:
-        for af in audiofiles:
+        for af in audio_files:
             _handle_audio_file(af, profile, args)
     except BaseException as e:
         print(e)
@@ -70,7 +78,7 @@ def main() -> int:
 
     return 0
 
-def _handle_audio_file(af: str, profile: changes.ChangeProfile, args):
+def _handle_audio_file(af: eyed3.core.AudioFile, profile: changes.ChangeProfile, args):
     rename_diff = False
     _, ext = os.path.splitext(os.path.basename(af.path))
     if args.rename:
@@ -81,26 +89,26 @@ def _handle_audio_file(af: str, profile: changes.ChangeProfile, args):
 
     if profile.needs_change(af) or rename_diff:
         if profile.needs_change(af):
-            print(
-                '\n'.join(f'{af.path}: PLAN {i}' for i in profile.whatif(af)))
+            plan_lines = (f'{af.path}: PLAN {i}' for i in profile.whatif(af))
+            LOG.info('\n'.join(plan_lines))
         new_name = f'{rename_to}{ext}'
         if args.rename and rename_diff:
-            print(f'"{af.path}" RENAME => "{new_name}"')
+            LOG.info(f'"{af.path}" RENAME => "{new_name}"')
         if args.dry_run:
             return
         else:
-            print('\n'.join(f'{af.path}: {i}' for i in profile.apply(af)))
-            print(f'{af.path}: Saving...')
+            LOG.info('\n'.join(f'{af.path}: {i}' for i in profile.apply(af)))
+            LOG.info(f'{af.path}: Saving...')
             af.tag.save()
-            print(f'{af.path}: Saved!')
+            LOG.debug(f'{af.path}: Saved!')
             if rename_to:
                 old_path = af.path
                 if os.path.basename(old_path) != f'{new_name}' and not args.dry_run:
-                    print(f'{af.path}: Renaming to "{new_name}"')
+                    LOG.info(f'{af.path}: Renaming to "{new_name}"')
                     af.rename(rename_to)
                     new_path = af.path
-                    print(f'{old_path}: Renamed to "{new_path}"')
+                    LOG.debug(f'{old_path}: Renamed to "{new_path}"')
                 if args.dry_run:
                     return
     else:
-        print(f'{af.path}: No change.')
+        LOG.warn(f'{af.path}: No change.')
