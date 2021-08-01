@@ -26,6 +26,6 @@ build: clean build-sdist build-wheel build-docker
 install:
 	${PYTHON_INTERPRETER} setup.py install ${PYTHON_INSTALL_ARGS}
 
-upload-local: build
+upload-local: build-sdist build-wheel
 	test ! -z "${TWINE_REPOSITORY_URL}"
 	twine upload -r "${TWINE_REPOSITORY_URL}" dist/*
