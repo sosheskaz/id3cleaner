@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import argparse
-import coloredlogs
+import logging
 import os
 import re
 import time

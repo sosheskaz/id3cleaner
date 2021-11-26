@@ -1,2 +1,1 @@
 eyed3>=0.9
-coloredlogs
