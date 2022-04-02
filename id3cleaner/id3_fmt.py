@@ -1,7 +1,9 @@
+'''Common string formatting tools dealing with id3 information.'''
 import eyed3
 
 
 def fmt_dict(audio_file: eyed3.mp3.Mp3AudioFile) -> dict:
+    '''Get a dict of substitutable fields from the audio file.'''
     fmt = {
         tag: getattr(audio_file.tag, tag)
         for tag in ('album', 'album_artist', 'album_type', 'artist',
@@ -18,5 +20,6 @@ def fmt_dict(audio_file: eyed3.mp3.Mp3AudioFile) -> dict:
     return fmt
 
 
-def format(fmt: str, audio_file: eyed3.mp3.Mp3AudioFile) -> str:
+def id3_fmt(fmt: str, audio_file: eyed3.mp3.Mp3AudioFile) -> str:
+    '''Perform a string format, dict-substituting fields from the given file.'''
     return fmt.format(**fmt_dict(audio_file))

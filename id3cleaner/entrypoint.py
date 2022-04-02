@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
+'''
+ID3 Cleaner CLI Entrypoint
+'''
 import argparse
+import functools
 import logging
-import os
-import re
-import time
+import pathlib
+import sys
+
+import coloredlogs
 import eyed3
 import eyed3.id3
-from id3cleaner import profiles, changes, id3_fmt
+import humanize
+
+import id3cleaner
+from id3cleaner import changes, id3_fmt, profiles
+from id3cleaner.errors import ID3CleanerError
 
 
 def _setuplogger(loglevel):
@@ -16,9 +25,85 @@ def _setuplogger(loglevel):
 
 
 LOG = logging.getLogger(__name__)
+coloredlogs.install()
 
 
 def main() -> int:
+    '''Run the program.'''
+    args = parse_args(sys.argv[1:])
+
+    if args.version:
+        print(id3cleaner.__version__)
+        return 2
+
+    _setuplogger(loglevel=args.loglevel)
+
+    filenames = [pathlib.Path(fn) for fn in args.filenames]
+    files_not_found = [fn for fn in filenames if not fn.exists()]
+    if files_not_found:
+        LOG.fatal('The following files were not found: %s',
+                  repr(files_not_found))
+        return 2
+
+    # force load of everything up front to make sure it works, then load
+    # lazily later to save cycles
+    LOG.info("Pre-loading all target files...")
+    for filename in filenames:
+        LOG.debug('\tPre-loading %s...', filename)
+        _ = eyed3.load(filename)
+    LOG.info("Pre-load succeeded.")
+
+    audio_files = (eyed3.load(filename) for filename in filenames)
+
+    profile = changes.ChangeProfile()
+    for optfield in ('title', 'artist', 'album', 'album_artist', 'track_num', 'genre'):
+        arg = getattr(args, optfield)
+        if arg is not None:
+            formatter = functools.partial(id3_fmt.id3_fmt, arg)
+            change = changes.ComplexID3Change(optfield, formatter)
+            profile.add_change(change)
+
+    if args.rename:
+        change = changes.SimpleRenameChange(args.rename, args.force_rename)
+        profile.add_change(change)
+
+    profiles.default_cleaner_profile(profile)
+
+    if args.rename:
+        change = changes.SimpleRenameChange(args.rename, args.force_rename)
+        profile.add_change(change)
+
+    if args.picture_file:
+        def get_picture(audio_file):
+            resolved_picture_f = id3_fmt.id3_fmt(args.picture_file, audio_file)
+            picture_file = pathlib.Path(resolved_picture_f)
+            LOG.info('Loading picture file %s...', picture_file)
+            with open(picture_file, 'rb') as picture_fd:
+                picture_file_bytes = picture_fd.read()
+
+            human_bytes = humanize.naturalsize(len(picture_file_bytes))
+            LOG.info('Picture file %s loaded (%s).', picture_file, human_bytes)
+            return picture_file_bytes
+        picture_change = changes.ImageID3Change('images', get_picture)
+        profile.add_change(picture_change)
+
+    nosave_profile = changes.ChangeProfile()
+    if args.rename:
+        change = changes.SimpleRenameChange(args.rename, args.force_rename)
+        nosave_profile.add_change(change)
+
+    try:
+        for audio_file in audio_files:
+            _handle_audio_file(audio_file, profile, nosave_profile=nosave_profile, dry_run=args.dry_run)
+    except ID3CleanerError as err:
+        LOG.fatal(err)
+        return 2
+
+    return 0
+
+
+def parse_args(argv: 'list[str]') -> argparse.Namespace:
+    '''Creates argument parser and parses CLI Args.'''
     parser = argparse.ArgumentParser()
     parser.add_argument('--title')
     parser.add_argument('--artist')
@@ -26,89 +111,44 @@ def main() -> int:
     parser.add_argument('--album-artist')
     parser.add_argument('--track-num', type=int)
     parser.add_argument('--genre', type=eyed3.id3.Genre)
-    parser.add_argument('--picture-file')
-    parser.add_argument('--rename')
+    parser.add_argument(
+        '--picture-file', help='Set the picture to the given file.')
+    parser.add_argument(
+        '--rename', help='Rename files using the given format string.')
+    parser.add_argument('--force-rename', action='store_true',
+                        help="When renaming, proceed with the rename even if "
+                        "the target file already exists.")
     parser.add_argument('filenames', nargs='+')
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--loglevel', default='INFO',
                         choices=('ERROR', 'WARN', 'INFO', 'DEBUG'))
-    args = parser.parse_args()
-    _setuplogger(args.loglevel)
-
-    filenames = args.filenames
-    files_not_found = [fn for fn in filenames
-                       if (not os.path.isfile(fn) and not os.path.islink(fn))]
-    if files_not_found:
-        LOG.error(f'The following files were not found: {files_not_found}')
+    parser.add_argument('--version', action='store_true',
+                        help='Print the version and exit')
+    args = parser.parse_args(argv)
+    return args
 
 
-    try:
-        # force load of everything up front to make sure it works, then load
-        # lazily later to save cycles
-        _ = all(eyed3.load(filename) for filename in filenames)
-    except Exception as e:
-        LOG.fatal(e)
-    audio_files = (eyed3.load(filename) for filename in filenames)
+def _handle_audio_file(audio_file: eyed3.core.AudioFile,
+                       profile: changes.ChangeProfile,
+                       nosave_profile: changes.ChangeProfile = None,
+                       dry_run: bool = False):
+    af_path = pathlib.Path(audio_file.path)
 
-    profile = changes.ChangeProfile()
-    for optfield in ('title', 'artist', 'album', 'album_artist', 'track_num', 'genre'):
-        arg = getattr(args, optfield)
-        if arg is not None:
-            arg2 = arg  # Make a copy to pass into lambda statically
-            change = changes.ComplexID3Change(
-                optfield, lambda f: id3_fmt.format(arg2, f))
-            profile.add_change(change)
+    if profile.needs_change(audio_file):
+        plans = profile.whatif(audio_file) + nosave_profile.whatif(audio_file)
+        for plan_line in plans:
+            LOG.info('%s: PLAN %s', af_path, plan_line)
 
-    profiles.default_cleaner_profile(profile)
-
-    if args.picture_file:
-        def get_picture(af):
-            with open(id3_fmt.format(args.picture_file, af), 'rb') as pf:
-                picture_file_bytes = pf.read()
-            return picture_file_bytes
-        picture_change = changes.ImageID3Change('images', get_picture)
-        profile.add_change(picture_change)
-
-    try:
-        for af in audio_files:
-            _handle_audio_file(af, profile, args)
-    except BaseException as e:
-        print(e)
-        return -1
-
-    return 0
-
-def _handle_audio_file(af: eyed3.core.AudioFile, profile: changes.ChangeProfile, args):
-    rename_diff = False
-    _, ext = os.path.splitext(os.path.basename(af.path))
-    if args.rename:
-        rename_to = id3_fmt.format(args.rename, af)
-        rename_to = re.sub(r'[/\\;#%{}<>*?+`|=]', '_', rename_to)
-        new_name = f'{rename_to}{ext}'
-        rename_diff = new_name != os.path.basename(af.path)
-
-    if profile.needs_change(af) or rename_diff:
-        if profile.needs_change(af):
-            plan_lines = (f'{af.path}: PLAN {i}' for i in profile.whatif(af))
-            LOG.info('\n'.join(plan_lines))
-        new_name = f'{rename_to}{ext}'
-        if args.rename and rename_diff:
-            LOG.info(f'"{af.path}" RENAME => "{new_name}"')
-        if args.dry_run:
+        if dry_run:
             return
-        else:
-            LOG.info('\n'.join(f'{af.path}: {i}' for i in profile.apply(af)))
-            LOG.info(f'{af.path}: Saving...')
-            af.tag.save()
-            LOG.debug(f'{af.path}: Saved!')
-            if rename_to:
-                old_path = af.path
-                if os.path.basename(old_path) != f'{new_name}' and not args.dry_run:
-                    LOG.info(f'{af.path}: Renaming to "{new_name}"')
-                    af.rename(rename_to)
-                    new_path = af.path
-                    LOG.debug(f'{old_path}: Renamed to "{new_path}"')
-                if args.dry_run:
-                    return
+
+        for i in profile.apply(audio_file):
+            LOG.info('%s: %s', af_path, i)
+        LOG.info('%s: Saving...', af_path)
+        audio_file.tag.save()
+        LOG.debug('%s: Saved.', af_path)
+
+        for i in nosave_profile.apply(audio_file):
+            LOG.info('%s: %s', af_path, i)
     else:
-        LOG.warn(f'{af.path}: No change.')
+        LOG.warning('%s: No change.', af_path)
