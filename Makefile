@@ -7,8 +7,8 @@ PRODUCT_NAME=$(shell ${PYTHON_INTERPRETER} setup.py --name)
 PRODUCT_VERSION=$(shell ${PYTHON_INTERPRETER} setup.py --version)
 
 devenv:
-	test ! -z "$$VIRTUAL_ENV" || ${PYTHON_INTERPRETER} -m pip install virtualenv
-	test ! -z "$$VIRTUAL_ENV" || ${PYTHON_INTERPRETER} -m virtualenv venv
+	${PYTHON_INTERPRETER} -m pip install virtualenv
+	${PYTHON_INTERPRETER} -m virtualenv venv
 	venv/bin/pip install setuptools wheel twine pylint autopep8 -r requirements.txt
 
 clean:

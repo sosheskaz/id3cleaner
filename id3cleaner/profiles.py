@@ -1,14 +1,19 @@
+'''
+Profiles, which are an ordered collection of changes to carry out.
+'''
 import copy
 from id3cleaner.changes import ChangeProfile, SimpleID3Change, SimpleFrameID3Change
 
 
-def strtrim(s):
-    if not isinstance(s, (str, bytes)):
-        return s
-    return f'{s.strip()}'
+def strtrim(text):
+    '''Trim whitespace from the string.'''
+    if not isinstance(text, (str, bytes)):
+        return text
+    return f'{text.strip()}'
 
 
 def lowercaselang(framedict):
+    '''Convert language spec to lowercase'''
     framedict = copy.deepcopy(framedict)
     for item in framedict.values():
         item['lang'] = item['lang'].lower()
@@ -16,6 +21,7 @@ def lowercaselang(framedict):
 
 
 def framestrtrim(framedict):
+    '''Trim excess whitespace from the framedict'''
     framedict = copy.deepcopy(framedict)
     for item in framedict.values():
         item['lang'] = item['lang'].strip()
